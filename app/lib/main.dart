@@ -19,16 +19,17 @@ class PadagamanamApp extends StatelessWidget {
           seedColor: const Color(0xFF6A3FA0),
         ),
         scaffoldBackgroundColor: const Color(0xFFF7F3EC),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF7F3EC),
+          foregroundColor: Color(0xFF29232F),
+        ),
       ),
       home: const PuzzleScreen(),
     );
   }
 }
 
-enum Direction {
-  across,
-  down,
-}
+enum Direction { across, down }
 
 class WordEntry {
   final int number;
@@ -66,28 +67,6 @@ class PadagamanamPuzzle {
   });
 }
 
-/*
-  TEST PUZZLE
-
-  Grid:
-
-  ■ 1 2 3 ■
-  ■ 4 5 6 ■
-  ■ ■ 7 8 ■
-  ■ ■ ■ ■ ■
-
-  Words:
-
-  కలము
-  కల
-  లయం
-  ముళ్లు
-  కళ్ళు
-
-  ప్రతి answerని Telugu grapheme clustersగా
-  విడిగా ఇస్తున్నాం.
-*/
-
 const testPuzzle = PadagamanamPuzzle(
   id: 'PG-TEST-001',
   title: 'పజిల్ 01',
@@ -102,7 +81,6 @@ const testPuzzle = PadagamanamPuzzle(
       col: 1,
       direction: Direction.across,
     ),
-
     WordEntry(
       number: 1,
       clue: 'నిద్రలో మనసు వేసే సినిమా',
@@ -111,7 +89,6 @@ const testPuzzle = PadagamanamPuzzle(
       col: 1,
       direction: Direction.down,
     ),
-
     WordEntry(
       number: 2,
       clue: 'శబ్దాల మధ్య కనిపించని అడుగు',
@@ -120,7 +97,6 @@ const testPuzzle = PadagamanamPuzzle(
       col: 2,
       direction: Direction.down,
     ),
-
     WordEntry(
       number: 3,
       clue: 'పువ్వును తాకే ముందు చేతిని ఆపేది',
@@ -129,7 +105,6 @@ const testPuzzle = PadagamanamPuzzle(
       col: 3,
       direction: Direction.down,
     ),
-
     WordEntry(
       number: 4,
       clue: 'చూస్తాయి; కానీ తమను తాము చూడలేవు',
@@ -153,14 +128,13 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
 
   late final List<List<String?>> solutionGrid;
   late final List<List<bool>> activeCells;
-
   late final List<List<TextEditingController>> controllers;
   late final List<List<FocusNode>> focusNodes;
 
   int selectedRow = 0;
   int selectedCol = 1;
+  Direction selectedDirection = Direction.across;
 
-  final Set<String> checkedCells = {};
   final Set<String> wrongCells = {};
 
   @override
@@ -199,15 +173,29 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
   void _buildGrid() {
     for (final word in puzzle.words) {
       for (int i = 0; i < word.answer.length; i++) {
-        final row = word.direction == Direction.down
-            ? word.row + i
-            : word.row;
+        final row =
+            word.direction == Direction.down ? word.row + i : word.row;
+        final col =
+            word.direction == Direction.across ? word.col + i : word.col;
 
-        final col = word.direction == Direction.across
-            ? word.col + i
-            : word.col;
+        if (row < 0 ||
+            row >= puzzle.size ||
+            col < 0 ||
+            col >= puzzle.size) {
+          throw StateError(
+            'Word ${word.number} goes outside the puzzle grid.',
+          );
+        }
 
         final letter = word.answer[i];
+        final existing = solutionGrid[row][col];
+
+        if (existing != null && existing != letter) {
+          throw StateError(
+            'Conflicting answers at row $row, column $col: '
+            '$existing and $letter.',
+          );
+        }
 
         solutionGrid[row][col] = letter;
         activeCells[row][col] = true;
@@ -219,18 +207,10 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
 
   bool _isCorrect(int row, int col) {
     final expected = solutionGrid[row][col];
-
-    if (expected == null) {
-      return false;
-    }
+    if (expected == null) return false;
 
     final typed = controllers[row][col].text.characters.toList();
-
-    if (typed.isEmpty) {
-      return false;
-    }
-
-    return typed.first == expected;
+    return typed.isNotEmpty && typed.first == expected;
   }
 
   void _handleInput(int row, int col, String value) {
@@ -238,82 +218,91 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
 
     if (chars.isEmpty) {
       wrongCells.remove(_cellKey(row, col));
-      checkedCells.remove(_cellKey(row, col));
-
       setState(() {});
       return;
     }
 
     final firstCharacter = chars.first;
 
-    controllers[row][col].value = TextEditingValue(
-      text: firstCharacter,
-      selection: TextSelection.collapsed(
-        offset: firstCharacter.length,
-      ),
-    );
+    if (value != firstCharacter) {
+      controllers[row][col].value = TextEditingValue(
+        text: firstCharacter,
+        selection: TextSelection.collapsed(
+          offset: firstCharacter.length,
+        ),
+      );
+    }
 
-    checkedCells.remove(_cellKey(row, col));
     wrongCells.remove(_cellKey(row, col));
-
     _moveToNextCell(row, col);
-
     setState(() {});
   }
 
   void _moveToNextCell(int row, int col) {
-    for (int c = col + 1; c < puzzle.size; c++) {
-      if (activeCells[row][c]) {
-        _selectCell(row, c);
-        return;
-      }
-    }
+    final dr = selectedDirection == Direction.down ? 1 : 0;
+    final dc = selectedDirection == Direction.across ? 1 : 0;
 
-    for (int r = row + 1; r < puzzle.size; r++) {
-      if (activeCells[r][col]) {
-        _selectCell(r, col);
+    var nextRow = row + dr;
+    var nextCol = col + dc;
+
+    while (nextRow >= 0 &&
+        nextRow < puzzle.size &&
+        nextCol >= 0 &&
+        nextCol < puzzle.size) {
+      if (activeCells[nextRow][nextCol]) {
+        _selectCell(nextRow, nextCol, requestKeyboard: true);
         return;
       }
+
+      nextRow += dr;
+      nextCol += dc;
     }
   }
 
-  void _selectCell(int row, int col) {
-    if (!activeCells[row][col]) {
-      return;
-    }
+  void _selectCell(
+    int row,
+    int col, {
+    bool requestKeyboard = false,
+  }) {
+    if (!activeCells[row][col]) return;
 
     setState(() {
       selectedRow = row;
       selectedCol = col;
     });
 
+    if (requestKeyboard) {
+      FocusScope.of(context).requestFocus(focusNodes[row][col]);
+    }
+  }
+
+  void _selectWord(WordEntry word) {
+    setState(() {
+      selectedDirection = word.direction;
+      selectedRow = word.row;
+      selectedCol = word.col;
+    });
+
     FocusScope.of(context).requestFocus(
-      focusNodes[row][col],
+      focusNodes[word.row][word.col],
     );
   }
 
   void _checkAnswers() {
     int total = 0;
     int correct = 0;
-
-    checkedCells.clear();
     wrongCells.clear();
 
     for (int row = 0; row < puzzle.size; row++) {
       for (int col = 0; col < puzzle.size; col++) {
-        if (!activeCells[row][col]) {
-          continue;
-        }
+        if (!activeCells[row][col]) continue;
 
         total++;
-
-        final key = _cellKey(row, col);
-        checkedCells.add(key);
 
         if (_isCorrect(row, col)) {
           correct++;
         } else {
-          wrongCells.add(key);
+          wrongCells.add(_cellKey(row, col));
         }
       }
     }
@@ -324,29 +313,35 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
 
     showDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(
-            completed
-                ? 'పజిల్ పూర్తయింది 🎉'
-                : 'మళ్ళీ ప్రయత్నించు',
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          completed ? 'పజిల్ పూర్తయింది 🎉' : 'మళ్ళీ ప్రయత్నించు',
+        ),
+        content: Text(
+          completed
+              ? 'అద్భుతం! అన్ని జవాబులు సరైనవి.'
+              : '$correct / $total అక్షరాలు సరైనవి.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('సరే'),
           ),
-          content: Text(
-            completed
-                ? 'అద్భుతం! అన్ని జవాబులు సరైనవి.'
-                : '$correct / $total అక్షరాలు సరైనవి.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('సరే'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
+  }
+
+  void _clearAnswers() {
+    for (int row = 0; row < puzzle.size; row++) {
+      for (int col = 0; col < puzzle.size; col++) {
+        if (activeCells[row][col]) {
+          controllers[row][col].clear();
+        }
+      }
+    }
+
+    setState(wrongCells.clear);
   }
 
   Widget _buildCell(int row, int col) {
@@ -369,15 +364,15 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
         : Colors.black87;
 
     return GestureDetector(
-      onTap: () => _selectCell(row, col),
+      onTap: () => _selectCell(row, col, requestKeyboard: true),
       child: Container(
         margin: const EdgeInsets.all(1.5),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: selected ? const Color(0xFFF0E5FA) : Colors.white,
           borderRadius: BorderRadius.circular(4),
           border: Border.all(
             color: borderColor,
-            width: selected ? 3 : 1,
+            width: selected ? 2.5 : 1,
           ),
         ),
         child: Center(
@@ -385,18 +380,16 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
             controller: controllers[row][col],
             focusNode: focusNodes[row][col],
             onTap: () => _selectCell(row, col),
-            onChanged: (value) {
-              _handleInput(row, col, value);
-            },
+            onChanged: (value) => _handleInput(row, col, value),
             textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.none,
+            keyboardType: TextInputType.text,
             maxLines: 1,
             maxLength: 6,
             style: TextStyle(
               fontSize: 23,
               fontWeight: FontWeight.w700,
-              color: wrong
-                  ? Colors.red
-                  : Colors.black,
+              color: wrong ? Colors.red : Colors.black,
             ),
             decoration: const InputDecoration(
               border: InputBorder.none,
@@ -412,57 +405,63 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
 
   Widget _clueItem(WordEntry word) {
     final directionText =
-        word.direction == Direction.across
-            ? 'అడ్డం'
-            : 'నిలువు';
+        word.direction == Direction.across ? 'అడ్డం' : 'నిలువు';
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8DDF2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              '${word.number}',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
+    final isSelectedWord =
+        selectedDirection == word.direction &&
+        selectedRow == word.row &&
+        selectedCol == word.col;
+
+    return InkWell(
+      onTap: () => _selectWord(word),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: isSelectedWord
+              ? const Color(0xFFEFE3F8)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8DDF2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${word.number}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Text(
-                  word.clue,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    height: 1.4,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    word.clue,
+                    style: const TextStyle(fontSize: 16, height: 1.4),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  directionText,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
+                  const SizedBox(height: 3),
+                  Text(
+                    '$directionText • ${word.length} అక్షరాలు',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade700,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -498,20 +497,13 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
       appBar: AppBar(
         title: const Text(
           'పద గమనం',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
         centerTitle: true,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(
-            18,
-            12,
-            18,
-            30,
-          ),
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 30),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -522,9 +514,7 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-
               const SizedBox(height: 4),
-
               Text(
                 puzzle.difficulty,
                 style: TextStyle(
@@ -532,67 +522,43 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
                   fontSize: 14,
                 ),
               ),
-
               const SizedBox(height: 22),
-
               Center(
                 child: SizedBox(
                   width: 330,
                   height: 330,
                   child: GridView.builder(
-                    physics:
-                        const NeverScrollableScrollPhysics(),
-                    itemCount:
-                        puzzle.size * puzzle.size,
-                    gridDelegate:
-                        SliverGridDelegateWithFixedCrossAxisCount(
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: puzzle.size * puzzle.size,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: puzzle.size,
                     ),
                     itemBuilder: (context, index) {
-                      final row =
-                          index ~/ puzzle.size;
-                      final col =
-                          index % puzzle.size;
-
+                      final row = index ~/ puzzle.size;
+                      final col = index % puzzle.size;
                       return _buildCell(row, col);
                     },
                   ),
                 ),
               ),
-
-              const SizedBox(height: 30),
-
+              const SizedBox(height: 24),
               const Text(
                 'అడ్డంగా',
-                style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
               ),
-
-              const SizedBox(height: 14),
-
+              const SizedBox(height: 10),
               ...across.map(_clueItem),
-
-              const SizedBox(height: 18),
-
+              const SizedBox(height: 16),
               const Text(
                 'నిలువుగా',
-                style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
               ),
-
-              const SizedBox(height: 14),
-
+              const SizedBox(height: 10),
               ...down.map(_clueItem),
-
-              const SizedBox(height: 20),
-
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
-                height: 56,
+                height: 54,
                 child: FilledButton(
                   onPressed: _checkAnswers,
                   child: const Text(
@@ -602,6 +568,15 @@ class _PuzzleScreenState extends State<PuzzleScreen> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton(
+                  onPressed: _clearAnswers,
+                  child: const Text('అన్ని జవాబులు తొలగించు'),
                 ),
               ),
             ],
