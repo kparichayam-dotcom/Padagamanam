@@ -354,7 +354,9 @@ class _CrosswordHomeState extends State<CrosswordHome> {
         Expanded(
           child: ListView.separated(
             itemCount: clues.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+            separatorB
+            
+          await tester.pumpWidget(const PadagamanamApp());,
             itemBuilder: (context, index) {
               final item = clues[index];
 
